@@ -119,7 +119,7 @@ func removeAfterTrampolineCall(tjump *tJump) error {
 // newHookContextImpl constructs a new HookContextImpl structure literal and
 // populates its Params && ReturnValues field with addresses of all arguments.
 // The HookContextImpl structure is used to pass arguments to the exit trampoline
-func newHookContextImpl(tjump *tJump) dst.Expr {
+func newHookContextImpl(tjump *tJump, packageName string) dst.Expr {
 	targetFunc := tjump.target
 	structName := trampolineHookContextImplType + tjump.rule.Identity()
 
@@ -143,17 +143,22 @@ func newHookContextImpl(tjump *tJump) dst.Expr {
 		returnExprs,
 	)
 
-	// Build the struct literal: &HookContextImpl{params:..., returnVals:...}
+	// Build the struct literal: &HookContextImpl{params:..., returnVals:...,
+	// funcName:..., packageName:...}. The names are part of the HookContext
+	// contract, so an after-only rule must carry them too: the before trampoline
+	// fills them in, but this context is built where no before trampoline exists.
 	return ast.StructLit(
 		structName,
 		ast.KeyValueExpr(trampolineParamsIdentifier, paramsSlice),
 		ast.KeyValueExpr(trampolineReturnValsIdentifier, returnValsSlice),
+		ast.KeyValueExpr(trampolineFuncNameIdentifier, ast.StringLit(targetFunc.Name.Name)),
+		ast.KeyValueExpr(trampolinePackageNameIdentifier, ast.StringLit(packageName)),
 	)
 }
 
 func removeBeforeTrampolineCall(targetFile *dst.File, tjump *tJump) error {
 	// Construct HookContext on the fly and pass to After trampoline defer call
-	hookContextExpr := newHookContextImpl(tjump)
+	hookContextExpr := newHookContextImpl(tjump, targetFile.Name.Name)
 	// Find defer call to After and replace its call context with new one
 	found := false
 	block := util.AssertType[*dst.BlockStmt](tjump.ifStmt.Else)

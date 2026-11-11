@@ -193,7 +193,7 @@ func TestNewHookContextImpl(t *testing.T) {
 				require.True(t, ok, "expression should be unary expression")
 				compositeLit, ok := unaryExpr.X.(*dst.CompositeLit)
 				require.True(t, ok, "expression should contain composite literal")
-				assert.Len(t, compositeLit.Elts, 2, "should have params and return values fields")
+				assert.Len(t, compositeLit.Elts, 4, "should carry params, return values, func name and package name")
 
 				// Verify params field has correct number of parameter addresses
 				paramsKV, ok := compositeLit.Elts[0].(*dst.KeyValueExpr)
@@ -271,13 +271,46 @@ func TestNewHookContextImpl(t *testing.T) {
 				},
 			}
 
-			expr := newHookContextImpl(tjump)
+			expr := newHookContextImpl(tjump, "main")
 			assert.NotNil(t, expr)
 			if tt.validate != nil {
 				tt.validate(t, expr)
 			}
 		})
 	}
+}
+
+// The after-only context is built where no before trampoline runs, so the names it
+// reports must be written into the literal itself (#1743).
+func TestNewHookContextImplCarriesNames(t *testing.T) {
+	targetFunc := parseFunc(t, `package main
+	func Example(p1 string) (r1 string) { return "" }`)
+	tjump := &tJump{
+		target: targetFunc,
+		rule: &rule.InstFuncRule{
+			Func: targetFunc.Name.Name,
+		},
+	}
+
+	expr := newHookContextImpl(tjump, "main")
+	unaryExpr, ok := expr.(*dst.UnaryExpr)
+	require.True(t, ok, "expression should be a unary expression")
+	compositeLit, ok := unaryExpr.X.(*dst.CompositeLit)
+	require.True(t, ok, "expression should hold a composite literal")
+	require.Len(t, compositeLit.Elts, 4, "params, returnVals, funcName and packageName")
+
+	fields := map[string]string{}
+	for _, elt := range compositeLit.Elts[2:] {
+		kv, ok := elt.(*dst.KeyValueExpr)
+		require.True(t, ok, "metadata fields should be key/value pairs")
+		key, ok := kv.Key.(*dst.Ident)
+		require.True(t, ok, "metadata key should be an identifier")
+		value, ok := kv.Value.(*dst.BasicLit)
+		require.True(t, ok, "metadata value should be a string literal")
+		fields[key.Name] = value.Value
+	}
+	assert.Equal(t, `"Example"`, fields["funcName"])
+	assert.Equal(t, `"main"`, fields["packageName"])
 }
 
 func TestStripTJumpLabel(t *testing.T) {
